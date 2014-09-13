@@ -1482,6 +1482,15 @@ bool AudioPolicyManagerBase::isOffloadSupported(const audio_offload_info_t& offl
      offloadInfo.stream_type, offloadInfo.bit_rate, offloadInfo.duration_us,
      offloadInfo.has_video);
 
+    // Check if offload has been disabled
+    char propValue[PROPERTY_VALUE_MAX];
+    if (property_get("audio.offload.disable", propValue, "0")) {
+        if (atoi(propValue) != 0) {
+            ALOGV("offload disabled by audio.offload.disable=%s", propValue );
+            return false;
+        }
+    }
+
     // Check if stream type is music, then only allow offload as of now.
     if (offloadInfo.stream_type != AUDIO_STREAM_MUSIC)
     {
@@ -1489,76 +1498,39 @@ bool AudioPolicyManagerBase::isOffloadSupported(const audio_offload_info_t& offl
         return false;
     }
 
-    char propValue[PROPERTY_VALUE_MAX];
-    bool pcmOffload = false;
-    if (audio_is_offload_pcm(offloadInfo.format)) {
-        if(property_get("audio.offload.pcm.enable", propValue, "false")) {
-            bool prop_enabled = atoi(propValue) || !strncmp("true", propValue, 4);
-            if (prop_enabled) {
-                ALOGW("PCM offload property is enabled");
-                pcmOffload = true;
-            }
-        }
-        if (!pcmOffload) {
-            ALOGD("copl: PCM offload disabled by property audio.offload.pcm.enable");
-            return false;
-        }
-    }
-
-    // Check if offload has been disabled
-    if (property_get("audio.offload.disable", propValue, "0")) {
-        if (atoi(propValue) != 0) {
-            ALOGD("copl: offload disabled by audio.offload.disable=%s", propValue );
-            return false;
-        }
-    }
-
-    //check if it's multi-channel AAC format
-    if (AudioSystem::popCount(offloadInfo.channel_mask) > 2
-          && offloadInfo.format == AUDIO_FORMAT_AAC) {
-        ALOGD("copl: offload disabled for multi-channel AAC format");
-        return false;
-    }
-
+    //TODO: enable audio offloading with video when ready
     if (offloadInfo.has_video)
     {
         if(property_get("av.offload.enable", propValue, "false")) {
             bool prop_enabled = atoi(propValue) || !strncmp("true", propValue, 4);
             if (!prop_enabled) {
-                ALOGW("offload disabled by av.offload.enable = %s ", propValue );
-                return false;
-            }
-        } else {
-            return false;
-        }
-
-        if(offloadInfo.is_streaming) {
-            if (property_get("av.streaming.offload.enable", propValue, "false")) {
-                bool prop_enabled = atoi(propValue) || !strncmp("true", propValue, 4);
-                if (!prop_enabled) {
-                   ALOGW("offload disabled by av.streaming.offload.enable = %s ", propValue );
-                   return false;
-                }
-            } else {
-                //Do not offload AV streamnig if the property is not defined
-                return false;
+               ALOGW("offload disabled by av.offload.enable = %s ", propValue );
+               return false;
             }
         }
-        ALOGD("copl: isOffloadSupported: has_video == true, property\
+        if(offloadInfo.is_streaming &&
+           property_get("av.streaming.offload.enable", propValue, "false")) {
+            bool prop_enabled = atoi(propValue) || !strncmp("true", propValue, 4);
+            if (!prop_enabled) {
+               ALOGW("offload disabled by av.streaming.offload.enable = %s ", propValue );
+               return false;
+            }
+        }
+        ALOGV("isOffloadSupported: has_video == true, property\
                 set to enable offload");
     }
 
     //If duration is less than minimum value defined in property, return false
     if (property_get("audio.offload.min.duration.secs", propValue, NULL)) {
         if (offloadInfo.duration_us < (atoi(propValue) * 1000000 )) {
-            ALOGD("copl: Offload denied by duration < audio.offload.min.duration.secs(=%s)", propValue);
+            ALOGV("Offload denied by duration < audio.offload.min.duration.secs(=%s)", propValue);
             return false;
         }
     } else if (offloadInfo.duration_us < OFFLOAD_DEFAULT_MIN_DURATION_SECS * 1000000) {
-        ALOGD("copl: Offload denied by duration < default min(=%u)", OFFLOAD_DEFAULT_MIN_DURATION_SECS);
+        ALOGV("Offload denied by duration < default min(=%u)", OFFLOAD_DEFAULT_MIN_DURATION_SECS);
         //duration checks only valid for MP3/AAC formats,
         //do not check duration for other audio formats, e.g. dolby AAC/AC3 and amrwb+ formats
-        if (offloadInfo.format == AUDIO_FORMAT_MP3 || offloadInfo.format == AUDIO_FORMAT_AAC || (pcmOffload && offloadInfo.bit_width < 24))
+        if (offloadInfo.format == AUDIO_FORMAT_MP3 || offloadInfo.format == AUDIO_FORMAT_AAC)
             return false;
     }
 
@@ -3820,9 +3792,9 @@ const struct StringToEnum sFormatNameToEnumTable[] = {
     STRING_TO_ENUM(AUDIO_FORMAT_MP2),
     STRING_TO_ENUM(AUDIO_FORMAT_EVRCNW),
     STRING_TO_ENUM(AUDIO_FORMAT_FLAC),
-#endif
     STRING_TO_ENUM(AUDIO_FORMAT_PCM_16_BIT_OFFLOAD),
     STRING_TO_ENUM(AUDIO_FORMAT_PCM_24_BIT_OFFLOAD),
+#endif
 };
 
 const struct StringToEnum sOutChannelsNameToEnumTable[] = {
